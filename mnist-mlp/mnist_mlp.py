@@ -8,15 +8,14 @@ from torch.utils.data import DataLoader
 
 
 class MLP(nn.Module):
-    def __init__(self, dim_fc1_out: int) -> None:
+    def __init__(self, hidden_layer_size: int) -> None:
         super().__init__()
         # Fully connected layer 1
-        self.fc1 = nn.Linear(28*28, dim_fc1_out)
-        print(f"Constructed a fully-connected layer 1 with {dim_fc1_out} neurons.")
+        self.fc1 = nn.Linear(28 * 28, hidden_layer_size)
         # Rectified linear unit
         self.relu = nn.ReLU()
         # Fully connected layer 2
-        self.fc2 = nn.Linear(dim_fc1_out, 10)
+        self.fc2 = nn.Linear(hidden_layer_size, 10)
 
     def forward(self, x) -> torch.Tensor:
         x = torch.flatten(x, 1)
@@ -29,30 +28,39 @@ class MLP(nn.Module):
 class DigitClassifier:
     _DATA_STORAGE_PATH: Final[str] = "./data"
 
-    def __init__(self, dim_fc1_out: int) -> None:
+    def __init__(
+        self, hidden_layer_size: int, learning_rate: float = 1e-3, epoch: int = 1
+    ) -> None:
         self.device = torch.device("cpu")
+        self.epoch = epoch
 
         transform = transforms.ToTensor()
         train_dataset = datasets.MNIST(
-            root=self._DATA_STORAGE_PATH, train=True, download=True, transform=transform)
+            root=self._DATA_STORAGE_PATH, train=True, download=True, transform=transform
+        )
         test_dataset = datasets.MNIST(
-            root=self._DATA_STORAGE_PATH, train=False, download=True, transform=transform)
+            root=self._DATA_STORAGE_PATH,
+            train=False,
+            download=True,
+            transform=transform,
+        )
 
-        self.train_loader = DataLoader(
-            train_dataset, batch_size=64, shuffle=True)
-        self.test_loader = DataLoader(
-            test_dataset, batch_size=256, shuffle=False)
+        self.train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        self.test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False)
 
-        self.model = MLP(dim_fc1_out).to(self.device)
+        self.model = MLP(hidden_layer_size).to(self.device)
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
 
-        # for g in self.optimizer.param_groups:
-        #     g['lr'] = 0.1
+        if learning_rate is not None:
+            for g in self.optimizer.param_groups:
+                g["lr"] = learning_rate
 
-        lr = self.optimizer.param_groups[0]['lr']
-        print(f"Learning Rate: {lr}")
+        lr = self.optimizer.param_groups[0]["lr"]
+        print(
+            f"Hidden layer size: {hidden_layer_size}, learning Rate: {lr}, epoch: {epoch}"
+        )
 
     def get_logits(self, images) -> torch.Tensor:
         return self.model(images.to(self.device))
@@ -61,12 +69,13 @@ class DigitClassifier:
         return self.criterion(logits, labels.to(self.device))
 
     def train(self) -> None:
-        for images, labels in self.train_loader:
-            self.optimizer.zero_grad()
-            logits = self.get_logits(images)
-            loss = self.get_loss(logits, labels)
-            loss.backward()
-            self.optimizer.step()
+        for _ in range(self.epoch):
+            for images, labels in self.train_loader:
+                self.optimizer.zero_grad()
+                logits = self.get_logits(images)
+                loss = self.get_loss(logits, labels)
+                loss.backward()
+                self.optimizer.step()
 
     def log_gradient_norms(self) -> None:
         for name, p in self.model.named_parameters():
@@ -88,14 +97,19 @@ class DigitClassifier:
 
 
 def main() -> None:
-    classifier = DigitClassifier(128)
+    hidden_layer_size = 128
+    learning_rate = None
+    epoch = 1
+
+    classifier = DigitClassifier(hidden_layer_size, learning_rate, epoch)
     start = time.perf_counter()
     classifier.train()
     classifier.log_gradient_norms()
     accuracy = classifier.evaluate()
     end = time.perf_counter()
     print(
-        f"Accuracy: {accuracy}, training and evaluation time in seconds: {end - start:.6f}")
+        f"Accuracy: {accuracy}, training and evaluation time in seconds: {end - start:.6f}"
+    )
 
 
 if __name__ == "__main__":
