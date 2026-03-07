@@ -1,6 +1,7 @@
 from typing import Final
 import time
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
@@ -18,22 +19,27 @@ plt.rcParams["font.sans-serif"] = ["Arial"]
 class MetricTracker:
     # Metric history used for plotting
     grad_history: list[float] = field(default_factory=list)
+    param_history: list[float] = field(default_factory=list)
     ratio_history: list[float] = field(default_factory=list)
 
     # Temporary buffers
-    _grad_buffer: list[float] = field(default_factory=list)
-    _param_buffer: list[float] = field(default_factory=list)
+    _grad_buffer: list[Tensor] = field(default_factory=list)
+    _param_buffer: list[Tensor] = field(default_factory=list)
 
-    def flush_to_history(self, log_step: int) -> None:
+    def flush_to_history(self) -> None:
         if not self._grad_buffer:
             return
 
-        grad_buffer_sum = sum(self._grad_buffer)
-        avg_grad = grad_buffer_sum / log_step
-        norm_ratio = grad_buffer_sum / sum(self._param_buffer)
+        grads = torch.stack(self._grad_buffer)
+        params = torch.stack(self._param_buffer)
+
+        eps = 1e-8  # Used to avoid division by zero
+        avg_grad = grads.mean().item()
+        avg_norm_ratio = (grads / (params + eps)).mean().item()
 
         self.grad_history.append(avg_grad)
-        self.ratio_history.append(norm_ratio)
+        self.param_history.append(params.mean().item())
+        self.ratio_history.append(avg_norm_ratio)
 
         self._grad_buffer.clear()
         self._param_buffer.clear()
@@ -92,7 +98,7 @@ class DigitClassifier:
         self.model = MLP(hidden_layer_size).to(self.device)
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
 
         self.metrics = defaultdict(MetricTracker)
 
@@ -103,7 +109,7 @@ class DigitClassifier:
         self.lr = self.optimizer.param_groups[0]["lr"]
 
         print(
-            f"Hidden layer size: {self.hidden_layer_size}, train batch size: {self.train_batch_size}, learning rate: {self.lr}, epoch: {epoch}, traning dataset size: {len(self.train_loader)}, test dataset size: {len(self.test_loader)}"
+            f"Hidden layer size: {self.hidden_layer_size}, train batch size: {self.train_batch_size}, learning rate: {self.lr}, epoch: {epoch}, training dataset size: {len(train_dataset)}, test dataset size: {len(test_dataset)}"
         )
 
     def get_logits(self, images) -> torch.Tensor:
@@ -113,17 +119,19 @@ class DigitClassifier:
         return self.criterion(logits, labels.to(self.device))
 
     def log_metrics(self, sample_index: int) -> None:
-        is_log_step = (sample_index + 1) % self._MODEL_LOG_STEP == 0
+        is_log_step = ((sample_index + 1) % self._MODEL_LOG_STEP == 0) or (
+            sample_index + 1 == len(self.train_loader)
+        )
 
         for name, p in self.model.named_parameters():
             metrics = self.metrics[name]
 
-            if is_log_step:
-                metrics.flush_to_history(self._MODEL_LOG_STEP)
-
             if p.grad is not None:
-                metrics._grad_buffer.append(p.grad.norm().item())
-                metrics._param_buffer.append(p.norm().item())
+                metrics._grad_buffer.append(p.grad.norm().detach())
+                metrics._param_buffer.append(p.norm().detach())
+
+            if is_log_step:
+                metrics.flush_to_history()
 
     def train(self) -> None:
         for _ in range(self.epoch):
@@ -133,7 +141,7 @@ class DigitClassifier:
                 loss = self.get_loss(logits, labels)
                 loss.backward()
                 self.optimizer.step()
-                self.log_metrics(i + 1)
+                self.log_metrics(i)
 
     def evaluate(self) -> None:
         self.model.eval()
@@ -148,29 +156,32 @@ class DigitClassifier:
         self.accuracy = 100 * correct / number_of_test_samples
 
     def plot_metrics(self) -> None:
-        fig1 = plt.figure("Gradients")
-        fig2 = plt.figure("Ratios")
+        fig1 = plt.figure("Gradients", figsize=(10, 5))
+        fig2 = plt.figure("Parameters", figsize=(10, 5))
+        fig3 = plt.figure("Ratios", figsize=(10, 5))
 
         for name, metrics in self.metrics.items():
-            x_axis = [
+            steps = [
                 (i + 1) * self._MODEL_LOG_STEP for i in range(len(metrics.grad_history))
             ]
 
-            plt.figure(fig1.number)
-            plt.plot(x_axis, metrics.grad_history, label=name, marker="o")
+            for fig_num, metric in [
+                (fig1.number, metrics.grad_history),
+                (fig2.number, metrics.param_history),
+                (fig3.number, metrics.ratio_history),
+            ]:
+                plt.figure(fig_num)
+                plt.plot(steps, metric, label=name, marker="o", markersize=4)
 
-            plt.figure(fig2.number)
-            plt.plot(x_axis, metrics.ratio_history, label=name, marker="o")
-
-        plt.figure(fig1.number)
-        plt.title("Gradient Norms")
-        plt.xlabel("Samples Processed")
-        plt.legend()
-
-        plt.figure(fig2.number)
-        plt.title("Norm Ratios")
-        plt.xlabel("Samples Processed")
-        plt.legend()
+        for fig_num, title in [
+            (fig1.number, "Gradient Norms"),
+            (fig2.number, "Parameter Norms"),
+            (fig3.number, "Norm Ratios"),
+        ]:
+            plt.figure(fig_num)
+            plt.title(title)
+            plt.xlabel("Samples Processed")
+            plt.legend()
 
         plt.show()
 
@@ -188,7 +199,7 @@ def main() -> None:
     classifier.train()
     classifier.evaluate()
     end = time.perf_counter()
-    print(f"Accuracy: {classifier.accuracy}, train + eval time: {end - start:.3f} sec")
+    print(f"Accuracy: {classifier.accuracy}%, train + eval time: {end - start:.3f} sec")
     classifier.plot_metrics()
 
 
