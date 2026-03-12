@@ -70,10 +70,9 @@ class MetricTracker:
         grads = torch.stack(self._grad_buffer)
         params = torch.stack(self._param_buffer)
 
-        eps = 1e-8  # Used to avoid division by zero
+        eps = 1e-12  # Used to avoid division by zero
         avg_grad = grads.mean().item()
-        # avg_norm_ratio = (grads / (params + eps)).mean().item()
-        avg_norm_ratio = (grads.sum() / params.sum()).item()
+        avg_norm_ratio = (grads / (params + eps)).mean().item()
 
         self.grad_history.append(avg_grad)
         self.param_history.append(params.mean().item())
