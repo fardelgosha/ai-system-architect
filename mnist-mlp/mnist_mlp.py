@@ -1,5 +1,3 @@
-import sys
-import copy
 import time
 from itertools import pairwise
 from typing import Tuple
@@ -22,26 +20,26 @@ plt.rcParams["font.sans-serif"] = ["Arial"]
 class MLPConfig:
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     layers_sizes: Tuple[int, ...] = (28 * 28, 128, 10)
-    activation: nn.Module = nn.ReLU()
+    activation_factory: nn.Module = nn.ReLU
     transform: transforms.ToTensor = transforms.ToTensor()
     data_storage_path: str = "./data"
     batch_size: int = 64
     learning_rate: float = 1e-3
     epochs: int = 1
-    model_log_step: int = 50
+    model_log_step: int = 25  # step size in the number of batches
 
 
 class MLP(nn.Module):
-    def __init__(self, mlp_config: MLPConfig) -> None:
+    def __init__(self, config: MLPConfig) -> None:
         super().__init__()
 
-        if len(mlp_config.layers_sizes) < 2:
-            sys.exit("ERROR: An MLP must have at least two layers!")
+        if len(config.layers_sizes) < 2:
+            raise ValueError("An MLP must have at least two layers!")
 
         layers = []
-        for in_f, out_f in pairwise(mlp_config.layers_sizes):
+        for in_f, out_f in pairwise(config.layers_sizes):
             layers.append(nn.Linear(in_f, out_f))
-            layers.append(copy.deepcopy(mlp_config.activation))
+            layers.append(config.activation_factory())
 
         layers.pop()
 
@@ -108,9 +106,9 @@ class MLPTrainer:
     def get_loss(self, logits, labels) -> torch.Tensor:
         return self.criterion(logits, labels.to(self.config.device))
 
-    def log_metrics(self, sample_index: int) -> None:
-        is_log_step = ((sample_index + 1) % self.config.model_log_step == 0) or (
-            sample_index + 1 == len(self.train_loader)
+    def log_metrics(self, batch_index: int) -> None:
+        is_log_step = ((batch_index + 1) % self.config.model_log_step == 0) or (
+            batch_index + 1 == len(self.train_loader) * self.config.epochs
         )
 
         for name, p in self.model.named_parameters():
@@ -125,14 +123,17 @@ class MLPTrainer:
 
     def train(self) -> dict[str, MetricTracker]:
         self.model.train()
+        # batch_index is the global batch index across all epochs
+        batch_index = 0
         for _ in range(self.config.epochs):
-            for i, (images, labels) in enumerate(self.train_loader):
+            for images, labels in self.train_loader:
                 self.optimizer.zero_grad()
                 logits = self.model(images.to(self.config.device))
                 loss = self.get_loss(logits, labels)
                 loss.backward()
                 self.optimizer.step()
-                self.log_metrics(i)
+                self.log_metrics(batch_index)
+                batch_index += 1
 
         return self.metrics
 
@@ -172,33 +173,39 @@ class MLPPlotter:
         self.config = mlp_config
 
     def plot_metrics(self) -> None:
-        fig1 = plt.figure("Gradients", figsize=(10, 5))
-        fig2 = plt.figure("Parameters", figsize=(10, 5))
-        fig3 = plt.figure("Ratios", figsize=(10, 5))
+        _, axes = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
 
         for name, metrics in self.metrics.items():
             steps = [
-                (i + 1) * self.config.model_log_step * self.config.batch_size
+                (i + 1) * self.config.model_log_step
                 for i in range(len(metrics.grad_history))
             ]
 
-            for fig_num, metric in [
-                (fig1.number, metrics.grad_history),
-                (fig2.number, metrics.param_history),
-                (fig3.number, metrics.ratio_history),
-            ]:
-                plt.figure(fig_num)
-                plt.plot(steps, metric, label=name, marker="o", markersize=4)
-
-        for fig_num, title in [
-            (fig1.number, "Gradient Norms"),
-            (fig2.number, "Parameter Norms"),
-            (fig3.number, "Norm Ratios"),
-        ]:
-            plt.figure(fig_num)
-            plt.title(title)
-            plt.xlabel("Samples Processed")
-            plt.legend()
+            for fig, (metric, title, y_label) in enumerate(
+                (
+                    (metrics.grad_history, "Average Gradient Norm", "L2 Norm"),
+                    (metrics.param_history, "Average Parameters Norm", "L2 Norm"),
+                    (
+                        metrics.ratio_history,
+                        "Average Gradient L2 Norm to Parameters L2 Norm",
+                        "Relative Norms",
+                    ),
+                )
+            ):
+                axes[fig].plot(
+                    steps,
+                    metric,
+                    label=name,
+                    linestyle="--",
+                    linewidth=1.5,
+                    marker="o",
+                    markersize=4,
+                )
+                axes[fig].set_title(title)
+                axes[fig].set_xlabel("Training Batches")
+                axes[fig].set_ylabel(y_label)
+                axes[fig].grid(True, alpha=0.3)
+                axes[fig].legend()
 
         plt.show()
 
