@@ -183,11 +183,11 @@ class MLPPlotter:
 
             for fig, (metric, title, y_label) in enumerate(
                 (
-                    (metrics.grad_history, "Average Gradient Norm", "L2 Norm"),
-                    (metrics.param_history, "Average Parameters Norm", "L2 Norm"),
+                    (metrics.grad_history, "Average Gradient Norm", "$L_2$ Norm"),
+                    (metrics.param_history, "Average Parameters Norm", "$L_2$ Norm"),
                     (
                         metrics.ratio_history,
-                        "Average Gradient L2 Norm to Parameters L2 Norm",
+                        "Average Gradient $L_2$ Norm to Parameters $L_2$ Norm",
                         "Relative Norms",
                     ),
                 )
