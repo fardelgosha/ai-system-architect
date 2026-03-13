@@ -20,8 +20,8 @@ plt.rcParams["font.sans-serif"] = ["Arial"]
 class MLPConfig:
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     layers_sizes: Tuple[int, ...] = (28 * 28, 128, 10)
-    activation_factory: nn.Module = nn.ReLU
-    transform: transforms.ToTensor = transforms.ToTensor()
+    activation_factory: type[nn.Module] = nn.ReLU
+    transform = transforms.ToTensor()
     data_storage_path: str = "./data"
     batch_size: int = 64
     learning_rate: float = 1e-3
@@ -45,7 +45,7 @@ class MLP(nn.Module):
 
         self.model = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = torch.flatten(x, 1)
         return self.model(x)
 
@@ -103,7 +103,7 @@ class MLPTrainer:
 
         self.metrics = defaultdict(MetricTracker)
 
-    def get_loss(self, logits, labels) -> torch.Tensor:
+    def get_loss(self, logits: Tensor, labels: Tensor) -> Tensor:
         return self.criterion(logits, labels.to(self.config.device))
 
     def log_metrics(self, batch_index: int) -> None:
@@ -131,8 +131,8 @@ class MLPTrainer:
                 logits = self.model(images.to(self.config.device))
                 loss = self.get_loss(logits, labels)
                 loss.backward()
-                self.optimizer.step()
                 self.log_metrics(batch_index)
+                self.optimizer.step()
                 batch_index += 1
 
         return self.metrics
@@ -181,7 +181,7 @@ class MLPPlotter:
                 for i in range(len(metrics.grad_history))
             ]
 
-            for fig, (metric, title, y_label) in enumerate(
+            for ax_idx, (metric, title, y_label) in enumerate(
                 (
                     (metrics.grad_history, "Average Gradient Norm", "$L_2$ Norm"),
                     (metrics.param_history, "Average Parameters Norm", "$L_2$ Norm"),
@@ -192,7 +192,7 @@ class MLPPlotter:
                     ),
                 )
             ):
-                axes[fig].plot(
+                axes[ax_idx].plot(
                     steps,
                     metric,
                     label=name,
@@ -201,11 +201,12 @@ class MLPPlotter:
                     marker="o",
                     markersize=4,
                 )
-                axes[fig].set_title(title)
-                axes[fig].set_xlabel("Training Batches")
-                axes[fig].set_ylabel(y_label)
-                axes[fig].grid(True, alpha=0.3)
-                axes[fig].legend()
+                axes[ax_idx].set_title(title)
+                axes[ax_idx].set_ylabel(y_label)
+                axes[ax_idx].grid(True, alpha=0.3)
+                axes[ax_idx].legend()
+
+        axes[-1].set_xlabel("Training Batches")
 
         plt.show()
 
