@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from collections import defaultdict
 import matplotlib.pyplot as plt
 
@@ -51,15 +51,40 @@ class MLP(nn.Module):
 
 
 @dataclass
-class MetricTracker:
+class Metric:
+    description: str
+    plot_label: str
     # Metric history used for plotting
-    grad_history: list[float] = field(default_factory=list)
-    param_history: list[float] = field(default_factory=list)
-    ratio_history: list[float] = field(default_factory=list)
+    history: list[float] = field(default_factory=list)
+
+
+@dataclass
+class MetricTracker:
+    grad: Metric = field(
+        default_factory=lambda: Metric(
+            description="Average Gradient Norm", plot_label="$L_2$ Norm"
+        )
+    )
+
+    param: Metric = field(
+        default_factory=lambda: Metric(
+            description="Average Parameters Norm", plot_label="$L_2$ Norm"
+        )
+    )
+
+    grad_to_param_ratio: Metric = field(
+        default_factory=lambda: Metric(
+            description="Average Gradient $L_2$ Norm to Parameters $L_2$ Norm",
+            plot_label="Relative Norms",
+        )
+    )
 
     # Temporary buffers
     _grad_buffer: list[Tensor] = field(default_factory=list)
     _param_buffer: list[Tensor] = field(default_factory=list)
+
+    def get_all_metrics(self) -> list[Metric]:
+        return [getattr(self, f.name) for f in fields(self) if f.type is Metric]
 
     def flush_to_history(self) -> None:
         if not self._grad_buffer:
@@ -69,12 +94,9 @@ class MetricTracker:
         params = torch.stack(self._param_buffer)
 
         eps = 1e-12  # Used to avoid division by zero
-        avg_grad = grads.mean().item()
-        avg_norm_ratio = (grads / (params + eps)).mean().item()
-
-        self.grad_history.append(avg_grad)
-        self.param_history.append(params.mean().item())
-        self.ratio_history.append(avg_norm_ratio)
+        self.grad.history.append(grads.mean().item())
+        self.param.history.append(params.mean().item())
+        self.grad_to_param_ratio.history.append((grads / (params + eps)).mean().item())
 
         self._grad_buffer.clear()
         self._param_buffer.clear()
@@ -103,9 +125,6 @@ class MLPTrainer:
 
         self.metrics = defaultdict(MetricTracker)
 
-    def get_loss(self, logits: Tensor, labels: Tensor) -> Tensor:
-        return self.criterion(logits, labels.to(self.config.device))
-
     def log_metrics(self, batch_index: int) -> None:
         is_log_step = ((batch_index + 1) % self.config.model_log_step == 0) or (
             batch_index + 1 == len(self.train_loader) * self.config.epochs
@@ -129,7 +148,7 @@ class MLPTrainer:
             for images, labels in self.train_loader:
                 self.optimizer.zero_grad()
                 logits = self.model(images.to(self.config.device))
-                loss = self.get_loss(logits, labels)
+                loss = self.criterion(logits, labels.to(self.config.device))
                 loss.backward()
                 self.log_metrics(batch_index)
                 self.optimizer.step()
@@ -178,31 +197,21 @@ class MLPPlotter:
         for name, metrics in self.metrics.items():
             steps = [
                 (i + 1) * self.config.model_log_step
-                for i in range(len(metrics.grad_history))
+                for i in range(len(metrics.grad.history))
             ]
 
-            for ax_idx, (metric, title, y_label) in enumerate(
-                (
-                    (metrics.grad_history, "Average Gradient Norm", "$L_2$ Norm"),
-                    (metrics.param_history, "Average Parameters Norm", "$L_2$ Norm"),
-                    (
-                        metrics.ratio_history,
-                        "Average Gradient $L_2$ Norm to Parameters $L_2$ Norm",
-                        "Relative Norms",
-                    ),
-                )
-            ):
+            for ax_idx, metric in enumerate(metrics.get_all_metrics()):
                 axes[ax_idx].plot(
                     steps,
-                    metric,
+                    metric.history,
                     label=name,
                     linestyle="--",
                     linewidth=1.5,
                     marker="o",
                     markersize=4,
                 )
-                axes[ax_idx].set_title(title)
-                axes[ax_idx].set_ylabel(y_label)
+                axes[ax_idx].set_title(metric.description)
+                axes[ax_idx].set_ylabel(metric.plot_label)
                 axes[ax_idx].grid(True, alpha=0.3)
                 axes[ax_idx].legend()
 
