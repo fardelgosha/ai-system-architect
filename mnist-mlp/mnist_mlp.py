@@ -192,7 +192,7 @@ class MLPPlotter:
         self.config = mlp_config
 
     def plot_metrics(self) -> None:
-        _, axes = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
+        _, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
 
         for name, metrics in self.metrics.items():
             steps = [
