@@ -21,7 +21,7 @@ class MLPConfig:
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     layers_sizes: Tuple[int, ...] = (28 * 28, 128, 10)
     activation_factory: type[nn.Module] = nn.ReLU
-    transform = transforms.ToTensor()
+    transform: transforms.ToTensor = transforms.ToTensor()
     data_storage_path: str = "./data"
     batch_size: int = 64
     learning_rate: float = 1e-3
